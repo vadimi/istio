@@ -16,6 +16,8 @@ package v1alpha3
 
 import (
 	"fmt"
+	"os"
+	"time"
 
 	xdsapi "github.com/envoyproxy/go-control-plane/envoy/api/v2"
 	"github.com/envoyproxy/go-control-plane/envoy/api/v2/auth"
@@ -306,6 +308,8 @@ func (configgen *ConfigGeneratorImpl) buildGatewayHTTPRouteConfig(env *model.Env
 func (configgen *ConfigGeneratorImpl) createGatewayHTTPFilterChainOpts(
 	node *model.Proxy, env *model.Environment, push *model.PushContext, servers []*networking.Server, gatewaysForWorkload map[string]bool) []*filterChainOpts {
 
+	connectionManager := buildGatewayHTTPConnectionManager()
+
 	httpListeners := make([]*filterChainOpts, 0, len(servers))
 	// Are we processing plaintext servers or HTTPS servers?
 	// If plain text, we have to combine all servers into a single listener
@@ -318,9 +322,10 @@ func (configgen *ConfigGeneratorImpl) createGatewayHTTPFilterChainOpts(
 			sniHosts:   nil,
 			tlsContext: nil,
 			httpOpts: &httpListenerOpts{
-				rds:              rdsName,
-				useRemoteAddress: true,
-				direction:        http_conn.EGRESS, // viewed as from gateway to internal
+				rds:               rdsName,
+				useRemoteAddress:  true,
+				direction:         http_conn.EGRESS, // viewed as from gateway to internal
+				connectionManager: connectionManager,
 			},
 		}
 		httpListeners = append(httpListeners, o)
@@ -336,9 +341,10 @@ func (configgen *ConfigGeneratorImpl) createGatewayHTTPFilterChainOpts(
 				sniHosts:   getSNIHostsForServer(server),
 				tlsContext: buildGatewayListenerTLSContext(server),
 				httpOpts: &httpListenerOpts{
-					rds:              model.GatewayRDSRouteName(server),
-					useRemoteAddress: true,
-					direction:        http_conn.EGRESS, // viewed as from gateway to internal
+					rds:               model.GatewayRDSRouteName(server),
+					useRemoteAddress:  true,
+					direction:         http_conn.EGRESS, // viewed as from gateway to internal
+					connectionManager: connectionManager,
 				},
 			}
 			httpListeners = append(httpListeners, o)
@@ -593,4 +599,28 @@ func getSNIHostsForServer(server *networking.Server) []string {
 		return nil
 	}
 	return server.Hosts
+}
+
+func buildGatewayHTTPConnectionManager() *http_conn.HttpConnectionManager {
+	connectionManager := &http_conn.HttpConnectionManager{}
+	notimeout := 0 * time.Second
+	idleTimeout := envDuration("GATEWAY_IDLE_TIMEOUT", notimeout)
+	if idleTimeout != notimeout {
+		connectionManager.IdleTimeout = &idleTimeout
+	}
+
+	return connectionManager
+}
+
+func envDuration(env string, def time.Duration) time.Duration {
+	envVal := os.Getenv(env)
+	if envVal == "" {
+		return def
+	}
+	d, err := time.ParseDuration(envVal)
+	if err != nil {
+		log.Warnf("Invalid value %s %s %v", env, envVal, err)
+		return def
+	}
+	return d
 }
