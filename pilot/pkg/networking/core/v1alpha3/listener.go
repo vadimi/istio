@@ -17,6 +17,7 @@ package v1alpha3
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -1401,6 +1402,11 @@ func buildHTTPConnectionManager(node *model.Proxy, env *model.Environment, httpO
 	// connectionManager.IdleTimeout = &notimeout
 	connectionManager.StreamIdleTimeout = &notimeout
 
+	idleTimeout := envDuration("GATEWAY_IDLE_TIMEOUT", notimeout)
+	if idleTimeout != notimeout {
+		connectionManager.IdleTimeout = &idleTimeout
+	}
+
 	if httpOpts.rds != "" {
 		rds := &http_conn.HttpConnectionManager_Rds{
 			Rds: &http_conn.Rds{
@@ -1616,4 +1622,17 @@ func buildCompleteFilterChain(pluginParams *plugin.InputParams, mutable *plugin.
 	}
 
 	return nil
+}
+
+func envDuration(env string, def time.Duration) time.Duration {
+	envVal := os.Getenv(env)
+	if envVal == "" {
+		return def
+	}
+	d, err := time.ParseDuration(envVal)
+	if err != nil {
+		log.Warnf("Invalid value %s %s %v", env, envVal, err)
+		return def
+	}
+	return d
 }
