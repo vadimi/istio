@@ -16,8 +16,10 @@ package v1alpha3
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	xdsapi "github.com/envoyproxy/go-control-plane/envoy/api/v2"
 	"github.com/envoyproxy/go-control-plane/envoy/api/v2/auth"
@@ -327,6 +329,8 @@ func (configgen *ConfigGeneratorImpl) buildGatewayHTTPRouteConfig(env *model.Env
 func (configgen *ConfigGeneratorImpl) createGatewayHTTPFilterChainOpts(
 	node *model.Proxy, server *networking.Server, routeName string) *filterChainOpts {
 
+	idleTimeout := envDuration("GATEWAY_IDLE_TIMEOUT")
+
 	serverProto := model.ParseProtocol(server.Port.Protocol)
 	// Are we processing plaintext servers or HTTPS servers?
 	// If plain text, we have to combine all servers into a single listener
@@ -349,7 +353,8 @@ func (configgen *ConfigGeneratorImpl) createGatewayHTTPFilterChainOpts(
 						Uri:     true,
 						Dns:     true,
 					},
-					ServerName: EnvoyServerName,
+					ServerName:  EnvoyServerName,
+					IdleTimeout: idleTimeout,
 				},
 			},
 		}
@@ -382,7 +387,8 @@ func (configgen *ConfigGeneratorImpl) createGatewayHTTPFilterChainOpts(
 					Uri:     true,
 					Dns:     true,
 				},
-				ServerName: EnvoyServerName,
+				ServerName:  EnvoyServerName,
+				IdleTimeout: idleTimeout,
 			},
 		},
 	}
@@ -729,4 +735,17 @@ func getSNIHostsForServer(server *networking.Server) []string {
 	}
 
 	return sniHosts
+}
+
+func envDuration(env string) *time.Duration {
+	envVal := os.Getenv(env)
+	if envVal == "" {
+		return nil
+	}
+	d, err := time.ParseDuration(envVal)
+	if err != nil {
+		log.Warnf("Invalid value %s %s %v", env, envVal, err)
+		return nil
+	}
+	return &d
 }
